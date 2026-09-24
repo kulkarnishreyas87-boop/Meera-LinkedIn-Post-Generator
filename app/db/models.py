@@ -24,6 +24,7 @@ class NoteStatus(str, Enum):
 
 class DraftStatus(str, Enum):
     pending = "pending"  # waiting for Meera's review
+    needs_facts = "needs_facts"  # good enough to approve once its [VERIFY] markers are filled
     approved = "approved"  # approved for Meera to post manually - nothing is published
     discarded = "discarded"
     superseded = "superseded"  # replaced by a redraft
@@ -58,6 +59,9 @@ class Note(SQLModel, table=True):
     triaged_at: datetime | None = None
 
 
+REVIEWABLE = {DraftStatus.pending, DraftStatus.needs_facts}
+
+
 class Draft(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     note_id: int = Field(foreign_key="note.id", index=True)
@@ -76,6 +80,12 @@ class Draft(SQLModel, table=True):
 
     checklist: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     reviewer_notes: str | None = None  # placeholders to fill / claims to verify
+
+    # Auto-review: quality score and who made the call. "approved" never publishes anything.
+    quality_score: int | None = None
+    decision: str | None = None  # auto_approved | auto_discarded | needs_facts | review
+    decided_by: str | None = None  # auto | meera
+    decision_reason: str | None = None
 
     telegram_message_id: int | None = None
     created_at: datetime = Field(default_factory=utcnow)

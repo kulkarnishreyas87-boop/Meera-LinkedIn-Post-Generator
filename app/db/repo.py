@@ -61,6 +61,7 @@ def read_notes_folder(folder: Path) -> list[tuple[str, str]]:
 def status_counts(session: Session) -> dict[str, int]:
     counts = Counter(n.status.value for n in session.exec(select(Note)).all())
     out = {s.value: counts.get(s.value, 0) for s in NoteStatus}
+    out["needs_facts"] = len(session.exec(select(Draft).where(Draft.status == DraftStatus.needs_facts)).all())
     out["not_now"] = len(
         session.exec(select(Note).where(Note.status == NoteStatus.triaged, Note.publishable == False)).all()  # noqa: E712
     )
@@ -121,5 +122,16 @@ def approved_this_week(session: Session) -> list[Draft]:
 
 
 def pending_drafts(session: Session) -> list[Draft]:
-    q = select(Draft).where(Draft.status == DraftStatus.pending).order_by(col(Draft.created_at).desc())
+    """Drafts waiting on Meera: plain review plus ones that only need facts filled."""
+    q = (
+        select(Draft)
+        .where(col(Draft.status).in_([DraftStatus.pending, DraftStatus.needs_facts]))
+        .order_by(col(Draft.created_at).desc())
+    )
     return list(session.exec(q).all())
+
+
+def auto_decision_counts(session: Session) -> dict[str, int]:
+    rows = session.exec(select(Draft).where(Draft.decided_by == "auto")).all()
+    out = Counter(d.decision for d in rows)
+    return {"auto_approved": out.get("auto_approved", 0), "auto_discarded": out.get("auto_discarded", 0)}

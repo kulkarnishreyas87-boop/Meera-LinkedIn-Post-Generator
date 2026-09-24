@@ -39,6 +39,11 @@ class Settings:
     enable_scheduler: bool
     skills_dir: Path
     web_dist: Path
+    # Auto-review of drafts (approve = ready for Meera to post manually; nothing is published)
+    auto_review: bool = True
+    auto_approve_min: int = 8  # draft quality score at or above this is auto-approved ("above 7")
+    auto_discard_below: int = 7  # below this (after one auto-redraft) is auto-discarded
+    auto_approve_with_verify: bool = False  # unfilled [VERIFY] markers block auto-approval
 
     def require_gemini(self) -> None:
         if not self.gemini_api_key:
@@ -72,4 +77,8 @@ def get_settings() -> Settings:
         enable_scheduler=_bool("ENABLE_SCHEDULER", True),
         skills_dir=ROOT / "skills",
         web_dist=ROOT / "web" / "dist",
+        auto_review=_bool("AUTO_REVIEW", True),
+        auto_approve_min=_int("AUTO_APPROVE_MIN", 8),
+        auto_discard_below=_int("AUTO_DISCARD_BELOW", 7),
+        auto_approve_with_verify=_bool("AUTO_APPROVE_WITH_VERIFY", False),
     )
