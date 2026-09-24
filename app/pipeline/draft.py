@@ -169,7 +169,10 @@ def self_review(body: str, questions: list[str]) -> list[dict[str, Any]]:
 def revise(body: str, problems: list[str]) -> str:
     prompt = (
         "Revise this draft so it fixes every problem listed, keeping everything else - voice, facts, "
-        "[VERIFY: ...] markers and structure - the same. Do not add new facts.\n\n"
+        "[VERIFY: ...] markers and structure - the same. Do not add new facts. If a fix needs a "
+        "Skinstinct-specific anecdote, number or event that is not already in the draft or the fact "
+        "sheet, do NOT invent one: use a fact-sheet item, or write a [VERIFY: ...] placeholder "
+        "describing what is needed.\n\n"
         "PROBLEMS:\n" + "\n".join(f"- {p}" for p in problems) + f"\n\nDRAFT:\n\"\"\"\n{body}\n\"\"\""
     )
     resp = gemini.generate(prompt, system=system_instruction(), json_schema=DRAFT_SCHEMA, temperature=0.4)

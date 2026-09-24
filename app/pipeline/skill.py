@@ -23,6 +23,10 @@ inline in exactly this form: [VERIFY: what needs checking or filling in]. For ex
 [VERIFY: return rate in humid cities, %]. Never invent Skinstinct data, study results or
 citations; if it is not in the note, the fact sheet or well-established general science,
 it must be a [VERIFY: ...] marker.
+Self-implication in particular must come from the note or the fact sheet (for example the
+months spent adjusting the serum base, or the humid-city returns). Never invent a Skinstinct
+anecdote, trial, mistake or result to satisfy the arc; if no real one fits, write a single
+placeholder such as [VERIFY: a real Skinstinct example of this mistake] instead of a story.
 """
 
 
