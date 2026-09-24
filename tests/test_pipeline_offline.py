@@ -124,3 +124,51 @@ def test_research_accepts_grounded_source(monkeypatch):
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["economictimes.indiatimes.com"]))
     angle = research.find_news_angle("note", None, None)
     assert angle.found and angle.url == "https://economictimes.indiatimes.com/news/x"
+
+
+def test_research_follows_doi_redirect_to_grounded_publisher(monkeypatch):
+    claim = json.dumps({"found": True, "title": "Azelaic acid delivery", "publisher": "Pharmaceuticals",
+                        "url": "https://doi.org/10.3390/ph18091273", "summary": "s", "relevance": "r"})
+    monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["mdpi.com"]))
+    monkeypatch.setattr(research, "follow_url", lambda u: "https://www.mdpi.com/1424-8247/18/9/1273")
+    angle = research.find_news_angle("note", None, None)
+    assert angle.found and angle.url.startswith("https://www.mdpi.com/")
+
+
+def test_research_redirect_to_ungrounded_domain_still_rejected(monkeypatch):
+    claim = json.dumps({"found": True, "title": "T", "publisher": "P", "url": "https://doi.org/10.1/x"})
+    monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["mdpi.com"]))
+    monkeypatch.setattr(research, "follow_url", lambda u: "https://somewhere-else.example/x")
+    assert research.find_news_angle("note", None, None).found is False
+
+
+def test_app_note_forbids_invented_anecdotes():
+    si = system_instruction()
+    assert "Never invent a Skinstinct" in si
+    assert si.index("Never invent a Skinstinct") > len(load_skill_text())  # appended, skill untouched
+
+
+def test_publisher_name_matching_is_strict():
+    srcs = [research.GroundedSource(title="economictimes.indiatimes.com", uri="u1"),
+            research.GroundedSource(title="mdpi.com", uri="u2")]
+    assert research.match_source(None, "The Economic Times", srcs).uri == "u1"
+    assert research.match_source(None, "P", srcs) is None
+    assert research.match_source(None, "Times", srcs) is None
+    assert research.match_source(None, "Pharma Wire", srcs) is None
+
+
+def test_research_falls_back_to_google_citation(monkeypatch):
+    from types import SimpleNamespace as NS
+
+    claim = json.dumps({"found": True, "title": "Azelaic acid review", "publisher": "Cureus",
+                        "url": "https://www.cureus.com/made-up", "summary": "s", "relevance": "r"})
+    r = _grounded(claim, ["mdpi.com", "1mg.com"])
+    r.candidates[0].grounding_metadata.grounding_supports = [
+        NS(grounding_chunk_indices=[0], segment=NS(text='"title": "Azelaic acid review"')),
+        NS(grounding_chunk_indices=[1], segment=NS(text="other")),
+    ]
+    monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: r)
+    monkeypatch.setattr(research, "follow_url", lambda u: u)
+    angle = research.find_news_angle("note", None, None)
+    assert angle.found and angle.url == "https://mdpi.com/article" and angle.source == "mdpi.com"
+    assert "cureus" not in angle.url and "check the headline" in angle.note
