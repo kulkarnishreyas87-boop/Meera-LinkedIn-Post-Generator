@@ -54,9 +54,21 @@ REVIEW_SCHEMA = {
                 },
                 "required": ["n", "passed", "note"],
             },
-        }
+        },
+        "voice_score": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 10,
+            "description": "0-10: would a regular reader of her published posts believe Meera wrote this, and is it strong enough to post under her name?",
+        },
+        "top_issue": {"type": "string", "description": "The single most important improvement, or 'none'."},
+        "invented_claims": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Scenes, events, conversations, documents or numbers attributed to Meera or Skinstinct that are NOT in the raw note or the fact sheet. Empty if none.",
+        },
     },
-    "required": ["answers"],
+    "required": ["answers", "voice_score", "top_issue", "invented_claims"],
 }
 
 
@@ -138,23 +150,51 @@ def write_draft(prompt: str) -> _DraftOut:
     raise RuntimeError(f"Draft generation failed: {last}")
 
 
-def self_review(body: str, questions: list[str]) -> list[dict[str, Any]]:
-    """Model answers the skill's self-check questions for this draft."""
+NO_REVIEW = {"voice_score": None, "top_issue": None, "invented_claims": []}
+
+REVIEW_RUBRIC = """\
+You are a sceptical editor who has read every post Meera has published, reviewing a draft written
+by someone else. Your job is to protect her name, not to encourage the writer.
+
+1. Answer each self-check question. passed=false if there is any real doubt; say why in one sentence.
+2. invented_claims: compare the draft with the RAW NOTE below and the fact sheet in your
+   instructions. List every scene, event, conversation, document, date or number that the draft
+   presents as Meera's or Skinstinct's own experience but that is NOT in the raw note or the fact
+   sheet. [VERIFY: ...] markers are fine - they are honest placeholders, not claims. General,
+   well-established science is fine. If the note is thin and the draft fills it with a vivid
+   first-person anecdote, that anecdote is invented.
+3. voice_score, anchored:
+   9-10  indistinguishable from her published posts AND built on real substance from the note
+   7-8   clearly her voice, minor issues
+   5-6   competent but generic, or padded far beyond what the note supports
+   0-4   off-voice, hype, or mostly invented
+   Most first drafts are 6-8. Reserve 9+ for drafts you would publish under her name unchanged.
+4. top_issue: the single most important fix, or 'none'.
+"""
+
+
+def self_review(body: str, questions: list[str], note_text: str = "") -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Critical review: self-check answers, anchored voice score, invented-claim check. Returns (answers, review)."""
     if not questions:
-        return []
+        return [], dict(NO_REVIEW)
     qs = "\n".join(f"{i}. {q}" for i, q in enumerate(questions, 1))
     prompt = (
-        "Review this draft strictly against the skill's self-check questions. Be critical: "
-        "answer passed=false if there is any real doubt, and say why in one short sentence.\n\n"
-        f"QUESTIONS:\n{qs}\n\nDRAFT:\n\"\"\"\n{body}\n\"\"\""
+        f"{REVIEW_RUBRIC}\nSELF-CHECK QUESTIONS:\n{qs}\n\n"
+        f"RAW NOTE FROM MEERA:\n\"\"\"\n{note_text.strip() or '(not provided)'}\n\"\"\"\n\n"
+        f"DRAFT:\n\"\"\"\n{body}\n\"\"\""
     )
     try:
-        resp = gemini.generate(prompt, system=system_instruction(), json_schema=REVIEW_SCHEMA, temperature=0.1)
+        resp = gemini.generate(prompt, system=system_instruction(), json_schema=REVIEW_SCHEMA, temperature=0.0)
         data = json.loads(gemini.response_text(resp))
         answers = {a.n: a for a in (_ReviewAnswer.model_validate(x) for x in data.get("answers", []))}
-    except (json.JSONDecodeError, ValidationError, gemini.GeminiUnavailable) as exc:
+        raw_score = data.get("voice_score")
+        voice = max(0, min(10, round(float(raw_score)))) if raw_score is not None else None
+        invented = [str(x).strip() for x in (data.get("invented_claims") or []) if str(x).strip()]
+        review = {"voice_score": voice, "top_issue": (data.get("top_issue") or "").strip() or None, "invented_claims": invented}
+    except (json.JSONDecodeError, ValidationError, gemini.GeminiUnavailable, TypeError, ValueError) as exc:
         log.warning("Self-review failed: %s", exc)
-        return [{"n": i, "question": q, "passed": None, "note": "Self-review unavailable"} for i, q in enumerate(questions, 1)]
+        unavailable = [{"n": i, "question": q, "passed": None, "note": "Self-review unavailable"} for i, q in enumerate(questions, 1)]
+        return unavailable, dict(NO_REVIEW)
     return [
         {
             "n": i,
@@ -163,7 +203,7 @@ def self_review(body: str, questions: list[str]) -> list[dict[str, Any]]:
             "note": answers[i].note if i in answers else "",
         }
         for i, q in enumerate(questions, 1)
-    ]
+    ], review
 
 
 def revise(body: str, problems: list[str]) -> str:
@@ -194,12 +234,16 @@ class DraftResult:
 def _problems(check: dict[str, Any], review: list[dict[str, Any]]) -> list[str]:
     out = [f"{c['label']} ({c['detail']})" for c in check["checks"] if not c["passed"] and c["severity"] == "error"]
     out += [f"Self-check #{r['n']} failed: {r['question']} - {r['note']}" for r in review if r["passed"] is False]
+    out += [
+        f"Invented detail not in the note or fact sheet - remove it or replace it with a [VERIFY: ...] placeholder: {c}"
+        for c in (check.get("review") or {}).get("invented_claims", [])
+    ]
     return out
 
 
-def evaluate(body: str) -> dict[str, Any]:
+def evaluate(body: str, note_text: str = "") -> dict[str, Any]:
     check = run_checklist(body)
-    check["self_check"] = self_review(body, self_check_questions())
+    check["self_check"], check["review"] = self_review(body, self_check_questions(), note_text)
     check["passed"] = check["passed"] and all(r["passed"] is not False for r in check["self_check"])
     return check
 
@@ -215,7 +259,7 @@ def produce_draft(
     prompt = build_draft_prompt(note_text, triage, angle, recent_posts, instruction, previous_body)
     out = write_draft(prompt)
     body = autofix(out.post)
-    check = evaluate(body)
+    check = evaluate(body, note_text)
     revised = False
 
     problems = _problems(check, check["self_check"])
@@ -224,7 +268,7 @@ def produce_draft(
         new_body = autofix(revise(body, problems))
         if new_body != body:
             body, revised = new_body, True
-            check = evaluate(body)
+            check = evaluate(body, note_text)
 
     check["revised"] = revised
     return DraftResult(body=body, reviewer_notes=out.reviewer_notes.strip(), checklist=check, revised=revised)

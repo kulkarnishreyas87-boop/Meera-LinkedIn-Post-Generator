@@ -27,6 +27,10 @@ Self-implication in particular must come from the note or the fact sheet (for ex
 months spent adjusting the serum base, or the humid-city returns). Never invent a Skinstinct
 anecdote, trial, mistake or result to satisfy the arc; if no real one fits, write a single
 placeholder such as [VERIFY: a real Skinstinct example of this mistake] instead of a story.
+The same goes for the hook: never invent a first-person scene, conversation, date, document or
+event ("last month a manufacturer sent me..."). Use a scene only if it is in the note or the fact
+sheet; otherwise open with one of the skill's other hook moves (a counterintuitive claim about
+something the reader owns, or a well-established data point).
 """
 
 
