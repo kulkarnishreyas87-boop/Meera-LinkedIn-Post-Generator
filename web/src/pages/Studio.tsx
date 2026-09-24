@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
+import { AutoReviewPanel, FillFactsPanel } from "../components/AutoReviewPanel";
 import { ChecklistPanel } from "../components/ChecklistPanel";
 import { DraftingProgress } from "../components/DraftingProgress";
 import { useDraftRunner } from "../components/Layout";
@@ -9,7 +10,7 @@ import { LinkedInPreview } from "../components/LinkedInPreview";
 import { useToast } from "../components/Toast";
 import { CategoryTile, EmptyState, noteDisplayStatus, PageHeader, ScoreChip, Skeleton, Spinner, StatusPill } from "../components/ui";
 import { api, ApiError } from "../lib/api";
-import { countVerify, countWords, pad, relative, stamp } from "../lib/format";
+import { countVerify, countWords, pad, relative, stamp, VERIFY_RE } from "../lib/format";
 import type { Draft, NoteDetail } from "../lib/types";
 
 async function copyText(text: string) {
@@ -138,7 +139,7 @@ function Versions({ drafts, current, onPick }: { drafts: Draft[]; current: numbe
             className={`h-7 rounded-full border px-2.5 font-mono text-[11px] ${d.id === current ? "border-ink bg-ink text-paper" : "border-hairline text-muted hover:border-ink-2"}`}
             title={d.redraft_instruction ? `Instruction: ${d.redraft_instruction}` : `Created ${relative(d.created_at)}`}
           >
-            v{d.version} · {d.status === "pending" ? "review" : d.status}
+            v{d.version} · {d.status === "pending" ? "review" : d.status.replace("_", " ")}
           </button>
         ))}
       </div>
@@ -166,7 +167,11 @@ function DraftWorkbench({ draft, note }: { draft: Draft; note: NoteDetail }) {
   const verify = useMemo(() => countVerify(body), [body]);
   const [lo, hi] = draft.checklist.word_range ?? [400, 550];
   const dirty = body !== draft.body;
-  const reviewable = draft.status === "pending";
+  const reviewable = draft.status === "pending" || draft.status === "needs_facts";
+  const verifyItems = useMemo(() => [...draft.body.matchAll(VERIFY_RE)].map((m) => m[0].slice(8, -1).trim()), [draft.body]);
+  const { data: st } = useQuery({ queryKey: ["status"], queryFn: api.status });
+  const approveMin = st?.auto_approve_min ?? 8;
+  const discardBelow = st?.auto_discard_below ?? 7;
 
   const refresh = () => qc.invalidateQueries();
   const save = useMutation({
@@ -211,17 +216,13 @@ function DraftWorkbench({ draft, note }: { draft: Draft; note: NoteDetail }) {
 
   return (
     <div className="space-y-5">
-      {/* status banner */}
-      {draft.status === "approved" && (
-        <div className="flex items-center gap-3 rounded-[10px] border border-sage/50 bg-sage-soft px-4 py-3 text-[13.5px] text-ink">
-          <span className="h-2 w-2 rounded-full bg-sage" />
-          Approved {relative(draft.approved_at)}. Ready for you to copy and publish on LinkedIn. Nothing has been posted.
-        </div>
-      )}
-      {(draft.status === "discarded" || draft.status === "superseded") && (
+      {/* auto-review decision (or plain status when auto-review is off) */}
+      {draft.status === "superseded" ? (
         <div className="rounded-[10px] border border-dashed border-hairline px-4 py-3 text-[13.5px] text-muted">
-          This version was {draft.status === "superseded" ? "replaced by a redraft" : "discarded"}. The note is kept.
+          This version was replaced by a redraft {relative(draft.updated_at)}. The note is kept.
         </div>
+      ) : (
+        <AutoReviewPanel draft={draft} approveMin={approveMin} discardBelow={discardBelow} />
       )}
 
       {/* instrument bar */}
@@ -259,6 +260,8 @@ function DraftWorkbench({ draft, note }: { draft: Draft; note: NoteDetail }) {
       </div>
 
       <LinkedInPreview body={body} editing={editing} onChange={setBody} meta={`Draft v${draft.version} · ${stamp(draft.created_at)}`} />
+
+      {reviewable && !editing && verifyItems.length > 0 && <FillFactsPanel key={`${draft.id}-${draft.body.length}`} draft={draft} items={verifyItems} />}
 
       {draft.reviewer_notes && (
         <div className="rounded-[10px] border border-hairline bg-paper-2/60 px-5 py-4">

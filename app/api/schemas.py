@@ -21,6 +21,10 @@ class DraftOut(BaseModel):
     news_note: str | None
     checklist: dict[str, Any]
     reviewer_notes: str | None
+    quality_score: int | None = None
+    decision: str | None = None
+    decided_by: str | None = None
+    decision_reason: str | None = None
     created_at: datetime
     updated_at: datetime
     approved_at: datetime | None
@@ -62,6 +66,10 @@ class RedraftIn(BaseModel):
     instruction: str | None = None
 
 
+class FillIn(BaseModel):
+    answers: list[str]  # one per [VERIFY] marker, in order; empty string leaves it
+
+
 class ImportResult(BaseModel):
     imported: int
     skipped: int
@@ -87,3 +95,7 @@ class StatusOut(BaseModel):
     telegram_configured: bool
     bot_running: bool
     scheduler_running: bool
+    auto_review: bool = False
+    auto_approve_min: int = 8
+    auto_discard_below: int = 7
+    auto_counts: dict[str, int] = {}

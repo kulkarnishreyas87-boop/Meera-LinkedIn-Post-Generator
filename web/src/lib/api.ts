@@ -49,5 +49,7 @@ export const api = {
   approve: (id: number) => post<Draft>(`/drafts/${id}/approve`),
   discard: (id: number) => post<Draft>(`/drafts/${id}/discard`),
   redraft: (id: number, instruction: string) => post<Draft>(`/drafts/${id}/redraft`, { instruction }),
+  reopen: (id: number) => post<Draft>(`/drafts/${id}/reopen`),
+  fill: (id: number, answers: string[]) => post<Draft>(`/drafts/${id}/fill`, { answers }),
   week: () => req<Week>("/week"),
 };

@@ -12,6 +12,7 @@ from app import scheduler
 from app.api.schemas import (
     DraftEdit,
     DraftOut,
+    FillIn,
     ImportResult,
     NoteDetail,
     NoteIn,
@@ -104,6 +105,10 @@ def status(session: Session = Depends(get_session)):
         telegram_configured=bool(s.telegram_bot_token and s.telegram_chat_id is not None),
         bot_running=runtime["bot_running"],
         scheduler_running=scheduler.next_run() is not None,
+        auto_review=s.auto_review,
+        auto_approve_min=s.auto_approve_min,
+        auto_discard_below=s.auto_discard_below,
+        auto_counts=repo.auto_decision_counts(session),
     )
 
 
@@ -206,6 +211,22 @@ def approve(draft_id: int):
 @router.post("/drafts/{draft_id}/discard", response_model=DraftOut)
 def discard(draft_id: int):
     return draft_out(_run(orchestrator.set_draft_status, draft_id, DraftStatus.discarded))
+
+
+@router.post("/drafts/{draft_id}/reopen", response_model=DraftOut)
+def reopen(draft_id: int):
+    """Undo an (auto-)approval or restore an (auto-)discarded draft back to review."""
+    return draft_out(_run(orchestrator.reopen_draft, draft_id))
+
+
+@router.post("/drafts/{draft_id}/fill", response_model=DraftOut)
+def fill(draft_id: int, body: FillIn):
+    """Fill [VERIFY] markers in order. May auto-approve if the draft then clears the bar."""
+    reply = "\n".join(f"{i}. {a.strip() or 'skip'}" for i, a in enumerate(body.answers, 1))
+    draft, filled, _ = _run(orchestrator.fill_facts, draft_id, reply)
+    if not filled:
+        raise HTTPException(422, "No facts were filled.")
+    return draft_out(draft)
 
 
 @router.post("/drafts/{draft_id}/redraft", response_model=DraftOut)

@@ -1,5 +1,6 @@
 export type NoteStatus = "new" | "triaged" | "drafted" | "approved" | "discarded";
-export type DraftStatus = "pending" | "approved" | "discarded" | "superseded";
+export type DraftStatus = "pending" | "needs_facts" | "approved" | "discarded" | "superseded";
+export type Decision = "auto_approved" | "auto_discarded" | "needs_facts" | "review" | "approved" | "discarded";
 
 export const CATEGORIES = [
   "Ingredient Deep-Dive",
@@ -32,6 +33,9 @@ export interface Checklist {
   checks?: Check[];
   self_check?: SelfCheck[];
   hard_failures?: string[];
+  review?: { voice_score: number | null; top_issue: string | null; invented_claims?: string[] };
+  quality?: { score: number | null; voice?: number | null; self_check?: string | null; note_score?: number; format_failures?: number; invented?: number; formula?: string };
+  auto_redraft_of_score?: number | null;
   passed?: boolean;
   revised?: boolean;
   edited?: boolean;
@@ -52,6 +56,10 @@ export interface Draft {
   news_note: string | null;
   checklist: Checklist;
   reviewer_notes: string | null;
+  quality_score: number | null;
+  decision: Decision | null;
+  decided_by: "auto" | "meera" | null;
+  decision_reason: string | null;
   created_at: string;
   updated_at: string;
   approved_at: string | null;
@@ -100,6 +108,10 @@ export interface Status {
   telegram_configured: boolean;
   bot_running: boolean;
   scheduler_running: boolean;
+  auto_review: boolean;
+  auto_approve_min: number;
+  auto_discard_below: number;
+  auto_counts: { auto_approved: number; auto_discarded: number };
 }
 
 export interface ImportResult {

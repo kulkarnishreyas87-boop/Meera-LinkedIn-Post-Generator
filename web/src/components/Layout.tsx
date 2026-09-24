@@ -30,7 +30,14 @@ function RunnerProvider({ children }: { children: ReactNode }) {
       setRunning(label);
       try {
         const d = await fn();
-        toast(`Draft ready · ${d.checklist.word_count ?? "?"} words`, "success");
+        const verdict: Record<string, string> = {
+          auto_approved: "auto-approved",
+          auto_discarded: "auto-discarded (restore it if you disagree)",
+          needs_facts: "needs facts",
+          review: "your call",
+        };
+        const score = d.quality_score != null ? ` · ${d.quality_score}/10` : "";
+        toast(`Draft ready${score}${d.decision ? ` · ${verdict[d.decision] ?? d.decision}` : ""}`, d.decision === "auto_discarded" ? "info" : "success");
         qc.invalidateQueries();
         navigate(`/studio/${d.note_id}`);
         return d;
@@ -98,7 +105,10 @@ function StatusLine() {
     <div className="space-y-1.5 font-mono text-[10.5px] text-muted">
       <div className="flex items-center gap-2">{dot(data.gemini_configured)} {data.model}</div>
       <div className="flex items-center gap-2">{dot(data.bot_running)} telegram {data.bot_running ? "live" : "off"}</div>
-      <div className="flex items-center gap-2">{dot(data.scheduler_running)} threshold {data.threshold}/10</div>
+      <div className="flex items-center gap-2">{dot(data.scheduler_running)} triage ≥{data.threshold}/10</div>
+      <div className="flex items-center gap-2" title="Draft auto-review rule">
+        {dot(data.auto_review)} {data.auto_review ? `auto ≥${data.auto_approve_min} ✓ · <${data.auto_discard_below} ✗` : "auto-review off"}
+      </div>
     </div>
   );
 }

@@ -54,11 +54,12 @@ const STATUS_STYLE: Record<string, string> = {
   not_now: "text-muted border-hairline border-dashed",
   drafted: "text-ochre border-ochre/40",
   pending: "text-ochre border-ochre/40",
+  needs_facts: "text-verify-ink border-verify-ink/40 bg-verify",
   approved: "text-sage-ink border-sage bg-sage-soft",
   discarded: "text-muted border-hairline line-through",
   superseded: "text-muted border-hairline",
 };
-const STATUS_LABEL: Record<string, string> = { not_now: "not now", pending: "in review" };
+const STATUS_LABEL: Record<string, string> = { not_now: "not now", pending: "in review", needs_facts: "needs facts" };
 
 export function StatusPill({ status }: { status: NoteStatus | DraftStatus | "not_now" }) {
   return (
