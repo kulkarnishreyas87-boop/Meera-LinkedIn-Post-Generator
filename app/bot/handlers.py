@@ -63,7 +63,16 @@ class DraftBot:
         settings.require_telegram()
         self.settings = settings
         self.chat_id = settings.telegram_chat_id
-        self.app: Application = ApplicationBuilder().token(settings.telegram_bot_token).build()
+        self.app: Application = (
+            ApplicationBuilder()
+            .token(settings.telegram_bot_token)
+            .connect_timeout(20)
+            .read_timeout(20)
+            .write_timeout(20)
+            .get_updates_connect_timeout(20)
+            .get_updates_read_timeout(30)
+            .build()
+        )
         self._register()
 
     # ---------- wiring ----------
@@ -82,8 +91,19 @@ class DraftBot:
         a.add_error_handler(self.on_error)
         orchestrator.register_notifier(self.send_draft)
 
-    async def start(self) -> None:
-        await self.app.initialize()
+    async def start(self, attempts: int = 4) -> None:
+        """Start polling, retrying transient network failures (slow or flaky connections)."""
+        delay = 3.0
+        for i in range(1, attempts + 1):
+            try:
+                await self.app.initialize()
+                break
+            except (TimedOut, NetworkError) as exc:
+                if isinstance(exc, BadRequest) or i == attempts:
+                    raise
+                log.warning("Telegram not reachable (%s); retry %d/%d in %.0fs", exc, i, attempts - 1, delay)
+                await asyncio.sleep(delay)
+                delay *= 2
         await self.app.start()
         await self.app.updater.start_polling(
             allowed_updates=["message", "channel_post", "callback_query"],
