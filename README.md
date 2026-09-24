@@ -38,6 +38,32 @@ flowchart LR
 7. **Self-check** - code checks word count, emojis, hashtags, bullets, bold/headers, em dashes, question hooks, hype words, CTAs, British spelling and `[VERIFY]` markers. The model then answers the skill's own 8 self-check questions (parsed from `SKILL.md`). If anything fails, the draft gets one automatic revision.
 8. **Output** - the draft goes to Telegram with **✅ Approve · ✏️ Redraft · 🗑️ Discard** buttons, and appears in the dashboard.
 
+### Auto-review (auto-approve / auto-discard)
+
+Every draft gets a **quality score out of 10**, and a rule decides what happens next. "Approved" still only means *ready for Meera to copy and post herself*. Nothing is ever published.
+
+**Score** = 0.45 × voice + 0.25 × self-check + 0.30 × note substance − 2 per format failure − 3 per invented claim
+
+- **Voice (0-10):** a sceptical reviewer pass compares the draft with her four published posts, using an anchored rubric in which most first drafts land at 6-8.
+- **Self-check:** the share of the skill's 8 self-check questions passed.
+- **Note substance:** the source note's triage score. A post can't be better than its raw material, so a fluent post padded out of a two-line note can't auto-approve.
+- **Invented claims:** the reviewer compares the draft with the raw note and fact sheet, and flags any scene, event, conversation or number presented as Meera's that isn't in either.
+
+| Score | What happens |
+|---|---|
+| **8-10** | ✅ **Auto-approved**, unless a safeguard below applies |
+| **7** | 👀 Goes to Meera, as before |
+| **0-6** | ↻ One automatic redraft using the reviewer's feedback. If still below 7: 🗑️ **auto-discarded** (the note is kept) |
+
+**Safeguards on top of the score:**
+
+- **Unfilled `[VERIFY]` facts block auto-approval.** The draft goes to **needs facts**. Meera taps ✍️ *Fill facts* in Telegram and replies with one answer per line, or uses the Fill-the-facts panel in the dashboard. Once nothing is left to fill and it still scores 8+, it auto-approves.
+- **Invented details are never auto-approved,** whatever the score. They're flagged 🚩 in Telegram and the dashboard.
+- **Drafts Meera asked for are never auto-discarded.** A redraft she requested always comes back to her.
+- **Every automatic call is reversible:** ↩️ *Undo approval* and ♻️ *Restore* in Telegram, or *Undo* / *Restore* in the Draft Studio.
+
+All thresholds live in `.env`: `AUTO_REVIEW`, `AUTO_APPROVE_MIN`, `AUTO_DISCARD_BELOW` and `AUTO_APPROVE_WITH_VERIFY`. Set `AUTO_REVIEW=false` to review every draft by hand.
+
 **Weekly rhythm:** every **Monday 09:00 IST**, the scheduler scores any new notes and drafts the top 3 for the week. You can also use **Draft next best note** in the dashboard or `/draft` in Telegram at any time.
 
 ### The voice skill
@@ -124,6 +150,8 @@ Or drag the folder onto the **Backlog** screen. To try it with no real data, imp
 | `/draft` | Draft the next best note (about a minute) |
 | `/backlog` | Top 5 unused notes with scores |
 | ✅ Approve | Marks the draft approved for you to post manually |
+| ✍️ Fill facts | Reply with the [VERIFY] facts, one per line; the draft auto-approves if it then scores 8+ |
+| ↩️ Undo · ♻️ Restore | Reverse an automatic approval or discard |
 | ✏️ Redraft | Reply to the bot's prompt with a one-line instruction, or tap *Just redraft* |
 | 🗑️ Discard | Discards the draft. The note is kept |
 
