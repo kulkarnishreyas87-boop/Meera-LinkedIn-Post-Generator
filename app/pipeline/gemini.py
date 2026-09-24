@@ -59,7 +59,11 @@ def generate(
     temperature: float = 0.7,
 ) -> types.GenerateContentResponse:
     """Run one generation. json_schema enables structured JSON output (not combined with search)."""
-    config = types.GenerateContentConfig(system_instruction=system, temperature=temperature)
+    config = types.GenerateContentConfig(
+        system_instruction=system,
+        temperature=temperature,
+        automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+    )
     if json_schema is not None:
         config.response_mime_type = "application/json"
         config.response_json_schema = json_schema
