@@ -26,10 +26,11 @@ from telegram.ext import (
 )
 
 from app.bot.filters import is_allowed_update, note_text
-from app.bot.format import redraft_keyboard, render_draft_messages, review_keyboard
+from app.bot.format import keyboard_for, redraft_keyboard, render_auto_discarded, render_draft_messages
 from app.config import Settings
 from app.db import repo
-from app.db.models import Draft, DraftStatus, Note
+from app.db.models import REVIEWABLE, Draft, DraftStatus, Note
+from app.pipeline.autoreview import verify_items
 from app.db.session import session_scope
 from app.pipeline import orchestrator
 from app.pipeline.gemini import GeminiUnavailable
@@ -37,6 +38,16 @@ from app.pipeline.gemini import GeminiUnavailable
 log = logging.getLogger(__name__)
 T = TypeVar("T")
 PENDING_REDRAFT = "pending_redraft"  # bot_data key: {prompt_message_id: draft_id}
+PENDING_FILL = "pending_fill"  # bot_data key: {prompt_message_id: draft_id}
+# Which drafts each button may act on
+ALLOWED = {
+    "a": REVIEWABLE,
+    "d": REVIEWABLE,
+    "f": {DraftStatus.needs_facts},
+    "r": REVIEWABLE | {DraftStatus.approved},
+    "rn": REVIEWABLE | {DraftStatus.approved},
+    "u": {DraftStatus.approved, DraftStatus.discarded},
+}
 
 
 async def with_tg_retry(fn: Callable[[], Awaitable[T]], attempts: int = 4) -> T:
@@ -131,10 +142,13 @@ class DraftBot:
             note = s.get(Note, draft.note_id) if draft else None
         if not draft or not note:
             return
-        msgs = render_draft_messages(draft, note)
+        if draft.decision == "auto_discarded" and draft.status == DraftStatus.discarded:
+            msgs = [render_auto_discarded(draft, note)]
+        else:
+            msgs = render_draft_messages(draft, note)
         last: Message | None = None
         for i, text in enumerate(msgs):
-            kb = review_keyboard(draft.id) if i == len(msgs) - 1 else None
+            kb = keyboard_for(draft) if i == len(msgs) - 1 else None
             last = await self.say(text, reply_markup=kb)
         if last:
             with session_scope() as s:
@@ -154,6 +168,11 @@ class DraftBot:
             draft_id = pending.pop(msg.reply_to_message.message_id)
             await self._redraft(draft_id, msg.text or msg.caption or "")
             return
+        fills: dict[int, int] = ctx.bot_data.setdefault(PENDING_FILL, {})
+        if msg.reply_to_message and msg.reply_to_message.message_id in fills:
+            draft_id = fills.pop(msg.reply_to_message.message_id)
+            await self._fill(draft_id, msg.text or msg.caption or "", ctx)
+            return
         text = note_text(update)
         if not text:
             return
@@ -170,18 +189,34 @@ class DraftBot:
             "Drop raw notes here - observations, two-liners, voice-note transcripts. I keep every one, "
             "score it, and draft the strongest into LinkedIn posts in your voice.\n\n"
             "I <b>never</b> post to LinkedIn. Approving a draft just marks it ready for you to copy and post.\n\n"
+            + (
+                f"Each draft gets a quality score. {self.settings.auto_approve_min}+ is auto-approved (once any "
+                f"[VERIFY] facts are filled), below {self.settings.auto_discard_below} gets one automatic redraft "
+                "and is then discarded, and anything in between comes to you. Every automatic call has an Undo "
+                "or Restore button.\n\n"
+                if self.settings.auto_review else ""
+            )
+            +
             "/status - counts per status\n/draft - draft the next best note\n/backlog - top 5 unused notes"
         )
 
     async def cmd_status(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
         with session_scope() as s:
             c = repo.status_counts(s)
+            auto = repo.auto_decision_counts(s)
             week = len(repo.approved_this_week(s))
+        st = self.settings
+        mode = (
+            f"Auto-review <b>on</b>: approve at {st.auto_approve_min}+, discard below {st.auto_discard_below} "
+            f"({auto['auto_approved']} auto-approved, {auto['auto_discarded']} auto-discarded so far)"
+            if st.auto_review else "Auto-review <b>off</b>: every draft waits for you"
+        )
         await self.say(
             "<b>Status</b>\n"
             f"<code>new        {c['new']:>3}\ntriaged    {c['triaged']:>3}  ({c['not_now']} not now)\n"
-            f"drafted    {c['drafted']:>3}\napproved   {c['approved']:>3}\ndiscarded  {c['discarded']:>3}</code>\n\n"
-            f"This week: <b>{week}/3</b> approved"
+            f"drafted    {c['drafted']:>3}  ({c['needs_facts']} need facts)\napproved   {c['approved']:>3}\n"
+            f"discarded  {c['discarded']:>3}</code>\n\n"
+            f"This week: <b>{week}/3</b> approved\n{mode}"
         )
 
     async def cmd_draft(self, update: Update, ctx: ContextTypes.DEFAULT_TYPE) -> None:
@@ -232,13 +267,28 @@ class DraftBot:
 
         with session_scope() as s:
             draft = s.get(Draft, draft_id)
-        if draft is None or draft.status != DraftStatus.pending:
-            state = draft.status.value if draft else "deleted"
+        if draft is None or draft.status not in ALLOWED.get(action, set()):
+            state = draft.status.value.replace("_", " ") if draft else "deleted"
             await q.answer(f"This draft is already {state}.")
             await self._close_buttons(q.message, f"This draft is already <b>{state}</b>.")
             return
 
-        if action == "a":
+        if action == "u":
+            was = draft.status
+            orchestrator.reopen_draft(draft_id)
+            await q.answer("Back in review.")
+            await self._close_buttons(q.message, "↩️ Approval undone." if was == DraftStatus.approved else "♻️ Restored.")
+            await self.send_draft(draft_id)
+        elif action == "f":
+            await q.answer()
+            items = verify_items(draft.body)
+            listing = "\n".join(f"{i}. {html.escape(it)}" for i, it in enumerate(items, 1))
+            prompt = await self.say(
+                f"✍️ <b>Reply to this message</b> with the facts for draft #{draft_id}, one per line:\n\n{listing}\n\n"
+                "<i>Your words replace each marker exactly as written. Write <code>skip</code> to leave one.</i>"
+            )
+            ctx.bot_data.setdefault(PENDING_FILL, {})[prompt.message_id] = draft_id
+        elif action == "a":
             orchestrator.set_draft_status(draft_id, DraftStatus.approved)
             await q.answer("Approved. Copy it and post it yourself.")
             await self._close_buttons(q.message, "✅ <b>Approved</b> - ready for you to copy and post on LinkedIn.")
@@ -262,6 +312,19 @@ class DraftBot:
             await self._redraft(draft_id, "")
         else:
             await q.answer()
+
+    async def _fill(self, draft_id: int, reply: str, ctx: ContextTypes.DEFAULT_TYPE) -> None:
+        draft, filled, missing = orchestrator.fill_facts(draft_id, reply)
+        if not filled:
+            await self.say("I couldn't match that to the [VERIFY] items. Tap ✍️ Fill facts and reply with one answer per line.")
+            return
+        if draft.status == DraftStatus.approved:
+            await self.say(f"✍️ Filled {filled} fact(s). Draft #{draft_id} now scores {draft.quality_score}/10 and is <b>auto-approved</b>:")
+        elif missing:
+            await self.say(f"✍️ Filled {filled} fact(s); {missing} still to go.")
+        else:
+            await self.say(f"✍️ Filled {filled} fact(s). Here's the updated draft:")
+        await self.send_draft(draft_id)
 
     async def _redraft(self, draft_id: int, instruction: str) -> None:
         with session_scope() as s:

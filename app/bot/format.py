@@ -27,6 +27,72 @@ def redraft_keyboard(draft_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[InlineKeyboardButton("↻ Just redraft", callback_data=f"rn:{draft_id}")]])
 
 
+def needs_facts_keyboard(draft_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("✍️ Fill facts", callback_data=f"f:{draft_id}"),
+                InlineKeyboardButton("✅ Approve anyway", callback_data=f"a:{draft_id}"),
+            ],
+            [
+                InlineKeyboardButton("✏️ Redraft", callback_data=f"r:{draft_id}"),
+                InlineKeyboardButton("🗑️ Discard", callback_data=f"d:{draft_id}"),
+            ],
+        ]
+    )
+
+
+def auto_approved_keyboard(draft_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        [[
+            InlineKeyboardButton("↩️ Undo approval", callback_data=f"u:{draft_id}"),
+            InlineKeyboardButton("✏️ Redraft", callback_data=f"r:{draft_id}"),
+        ]]
+    )
+
+
+def auto_discarded_keyboard(draft_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("♻️ Restore to review", callback_data=f"u:{draft_id}")]])
+
+
+def keyboard_for(draft: Draft) -> InlineKeyboardMarkup | None:
+    status = getattr(draft.status, "value", draft.status)
+    if status == "approved":
+        return auto_approved_keyboard(draft.id)
+    if status == "discarded":
+        return auto_discarded_keyboard(draft.id)
+    if status == "needs_facts":
+        return needs_facts_keyboard(draft.id)
+    if status == "pending":
+        return review_keyboard(draft.id)
+    return None
+
+
+DECISION_BANNER = {
+    "auto_approved": "✅ <b>Auto-approved</b> - ready for you to copy and post on LinkedIn. Nothing has been published.",
+    "needs_facts": "✍️ <b>Needs facts</b> - fill the [VERIFY] items and it approves itself.",
+    "review": "👀 <b>Your call</b>",
+    "auto_discarded": "🗑️ <b>Auto-discarded</b> - the note is kept. Restore it if you disagree.",
+}
+
+
+def decision_line(draft: Draft) -> str:
+    banner = DECISION_BANNER.get(draft.decision or "", "")
+    reason = html.escape(draft.decision_reason or "")
+    return f"{banner}\n<i>{reason}</i>" if banner else ""
+
+
+def render_auto_discarded(draft: Draft, note: Note) -> str:
+    """Compact message for auto-discards: no need to read the full post."""
+    preview = html.escape(note.text.strip().replace("\n", " ")[:140])
+    score = f"{draft.quality_score}/10" if draft.quality_score is not None else "?"
+    return (
+        f"🗑️ <b>Auto-discarded draft #{draft.id}</b> · note #{note.id} · score {score}\n"
+        f"<i>{html.escape(draft.decision_reason or '')}</i>\n\n"
+        f"Note: “{preview}…”\n\nThe note is kept. Tap Restore to review the draft yourself."
+    )
+
+
 def highlight_verify(text: str) -> str:
     """HTML-escape the body and underline+bold every [VERIFY: ...] marker."""
     out, last = [], 0
@@ -46,7 +112,11 @@ def header(draft: Draft, note: Note) -> str:
     bits.append(f"{c.get('word_count', '?')} words")
     if c.get("verify_count"):
         bits.append(f"{c['verify_count']} [VERIFY]")
-    return "📝 <b>" + " · ".join(bits) + "</b>"
+    if draft.quality_score is not None:
+        bits.append(f"score {draft.quality_score}/10")
+    head = "📝 <b>" + " · ".join(bits) + "</b>"
+    line = decision_line(draft)
+    return f"{head}\n{line}" if line else head
 
 
 def footer(draft: Draft) -> str:
@@ -60,6 +130,9 @@ def footer(draft: Draft) -> str:
     failed = [ch["label"] for ch in c.get("checks", []) if not ch["passed"] and ch["severity"] != "info"]
     failed += [f"Self-check #{r['n']}" for r in c.get("self_check", []) if r.get("passed") is False]
     lines.append("☑️ Checklist: all passed" if not failed else "⚠️ Check: " + html.escape(", ".join(failed)))
+    invented = (c.get("review") or {}).get("invented_claims") or []
+    if invented:
+        lines.append("🚩 <b>Possibly invented</b> (not in your note or fact sheet): " + html.escape("; ".join(invented)))
     if draft.reviewer_notes:
         lines.append("🔎 " + html.escape(draft.reviewer_notes))
     lines.append("<i>Drafts only - nothing is posted to LinkedIn. Approve = ready for you to copy and post.</i>")
