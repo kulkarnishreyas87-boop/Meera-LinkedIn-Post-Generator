@@ -19,10 +19,24 @@ def get_engine():
 
         @event.listens_for(_engine, "connect")
         def _pragmas(dbapi_conn, _):  # WAL lets the bot, API and scheduler share the file
+            # Work around a well-known pysqlite pitfall: Python's built-in sqlite3 driver
+            # manages transactions itself (issuing its own BEGIN/COMMIT under the hood) in a
+            # way that conflicts with SQLAlchemy's own transaction tracking. Left alone, a
+            # pooled connection can end up with no transaction ever properly (re)started for
+            # a later read, so it keeps returning the WAL snapshot from whenever its last
+            # transaction began - readers (like the API) can then serve stale data forever
+            # after a write from a different connection (the bot, the scheduler), even though
+            # the write is safely committed. See:
+            # https://docs.sqlalchemy.org/en/20/dialects/sqlite.html#serializable-isolation-savepoints-transactional-ddl
+            dbapi_conn.isolation_level = None  # let SQLAlchemy drive transactions explicitly
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA journal_mode=WAL")
             cur.execute("PRAGMA foreign_keys=ON")
             cur.close()
+
+        @event.listens_for(_engine, "begin")
+        def _begin(conn):
+            conn.exec_driver_sql("BEGIN")
 
     return _engine
 
