@@ -180,6 +180,34 @@ class DraftBot:
             note = repo.create_note(s, text, source="telegram", telegram_message_id=msg.message_id)
         if note:
             log.info("Stored note %s from Telegram message %s", note.id, msg.message_id)
+            if self.settings.instant_draft:
+                asyncio.create_task(self._process_new_note(note.id))
+
+    async def _process_new_note(self, note_id: int) -> None:
+        """Instant trigger: score the note now, tell Meera, and draft it if it's strong enough."""
+        try:
+            note = await asyncio.to_thread(orchestrator.triage_note, note_id)
+        except GeminiUnavailable:
+            await self.say(f"📥 Saved note #{note_id}. Gemini is busy right now - it'll be scored on the next /draft or Monday's batch.")
+            return
+        except Exception:
+            log.exception("Instant triage failed for note %s", note_id)
+            await self.say(f"📥 Saved note #{note_id}, but scoring failed. It'll be retried on the next /draft.")
+            return
+        reason = html.escape(note.reason or "")
+        cat = html.escape(note.category or "")
+        if not note.publishable:
+            await self.say(f"📥 Note #{note.id} saved · <b>{note.score}/10</b> · not now\n<i>{reason}</i>\nKept in the backlog - nothing is deleted.")
+            return
+        await self.say(f"📥 Note #{note.id} · <b>{note.score}/10</b> · {cat}\n<i>{reason}</i>\n"
+                       "Drafting now: checking Google News for a current angle, writing, then fact-checking. About 1-2 minutes.")
+        try:
+            await orchestrator.draft_note_async(note.id)  # sends the draft with its buttons when done
+        except GeminiUnavailable:
+            await self.say(f"Gemini is rate-limited right now. Note #{note.id} is queued - send /draft to retry.")
+        except Exception:
+            log.exception("Instant draft failed for note %s", note.id)
+            await self.say(f"Drafting note #{note.id} failed. Details are in the server log; /draft will retry it.")
 
     # ---------- commands ----------
 
