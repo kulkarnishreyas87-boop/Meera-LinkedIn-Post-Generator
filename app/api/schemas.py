@@ -19,12 +19,18 @@ class DraftOut(BaseModel):
     news_url: str | None
     news_summary: str | None
     news_note: str | None
+    news_published: str | None = None
+    news_tier: str | None = None
+    news_via: str | None = None
+    sources: list[dict[str, Any]] | None = None
+    first_comment: str = ""  # ready-to-paste "Sources:" text for LinkedIn's first comment
     checklist: dict[str, Any]
     reviewer_notes: str | None
     quality_score: int | None = None
     decision: str | None = None
     decided_by: str | None = None
     decision_reason: str | None = None
+    telegram_message_id: int | None = None
     created_at: datetime
     updated_at: datetime
     approved_at: datetime | None

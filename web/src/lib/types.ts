@@ -25,7 +25,30 @@ export interface SelfCheck {
   note: string;
 }
 
+export type Tier = "regulator" | "journal" | "press" | "trade" | "other";
+
+export interface Source {
+  role: "news angle" | "supports a claim";
+  title: string;
+  publisher: string;
+  url: string;
+  published?: string | null;
+  tier: Tier;
+  tier_label: string;
+  via?: string;
+  link_is_publisher?: boolean;
+  claim?: string;
+}
+
+export interface ClaimResult {
+  claim: string;
+  verdict: "supported" | "contradicted" | "unclear";
+  explanation: string;
+  source: { title: string; publisher: string; url: string; tier: Tier; tier_label: string } | null;
+}
+
 export interface Checklist {
+  claim_check?: { claims: ClaimResult[]; supported: number; contradicted: number; unclear: number };
   word_count?: number;
   word_range?: [number, number];
   verify_count?: number;
@@ -54,12 +77,18 @@ export interface Draft {
   news_url: string | null;
   news_summary: string | null;
   news_note: string | null;
+  news_published: string | null;
+  news_tier: Tier | null;
+  news_via: "google_news" | "google_search" | null;
+  sources: Source[] | null;
+  first_comment: string;
   checklist: Checklist;
   reviewer_notes: string | null;
   quality_score: number | null;
   decision: Decision | null;
   decided_by: "auto" | "meera" | null;
   decision_reason: string | null;
+  telegram_message_id: number | null;
   created_at: string;
   updated_at: string;
   approved_at: string | null;

@@ -27,6 +27,7 @@ from app.db.models import Draft, DraftStatus, Note, NoteStatus
 from app.db.session import get_session
 from app.pipeline import orchestrator
 from app.pipeline.gemini import GeminiUnavailable
+from app.pipeline.sources import first_comment_text
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -45,6 +46,8 @@ def draft_out(d: Draft) -> DraftOut:
         data[k] = _utc(data[k])
     data["status"] = d.status.value
     data["checklist"] = d.checklist or {}
+    data["sources"] = d.sources or []
+    data["first_comment"] = first_comment_text(d.sources or [])
     return DraftOut(**data)
 
 

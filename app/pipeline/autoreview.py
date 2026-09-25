@@ -12,6 +12,8 @@ Draft quality score (0-10):
 Decision (defaults: approve >= 8, discard < 7):
     score >= approve_min
         invented claim flagged    -> review (never auto-approved)
+        contradicted claim        -> review (never auto-approved, no penalty: the checker can be wrong
+                                     and the claim may be Meera's own position, so she decides)
         hard format failure left  -> review
         [VERIFY] markers left     -> needs_facts (auto-approves once Meera fills them)
         otherwise                 -> auto_approved
@@ -33,6 +35,10 @@ FORMAT_PENALTY, INVENTED_PENALTY = 2, 3
 DEFAULT_NOTE_SCORE = 7  # used when a note was never triaged (e.g. drafted directly)
 
 
+def contradicted_claims(checklist: dict[str, Any]) -> list[dict[str, Any]]:
+    return [c for c in (checklist.get("claim_check") or {}).get("claims", []) if c.get("verdict") == "contradicted"]
+
+
 @dataclass(frozen=True)
 class Decision:
     action: str  # auto_approved | auto_discarded | needs_facts | review
@@ -44,13 +50,14 @@ def quality_score(checklist: dict[str, Any]) -> tuple[int | None, dict[str, Any]
     review = checklist.get("review") or {}
     voice = review.get("voice_score")
     invented = list(review.get("invented_claims") or [])
+    wrong = contradicted_claims(checklist)
     answered = [r for r in checklist.get("self_check", []) if r.get("passed") is not None]
     hard = list(checklist.get("hard_failures", []))
     note = checklist.get("note_score")
     note = DEFAULT_NOTE_SCORE if note is None else note
     if voice is None or not answered:
         return None, {"voice": voice, "self_check": None, "note_score": note, "format_failures": len(hard),
-                      "invented": len(invented), "note": "reviewer unavailable"}
+                      "invented": len(invented), "contradicted": len(wrong), "note": "reviewer unavailable"}
     passed = sum(1 for r in answered if r["passed"])
     rate = passed / len(answered)
     raw = (VOICE_WEIGHT * voice + SELF_CHECK_WEIGHT * 10 * rate + NOTE_WEIGHT * note
@@ -62,6 +69,7 @@ def quality_score(checklist: dict[str, Any]) -> tuple[int | None, dict[str, Any]
         "note_score": note,
         "format_failures": len(hard),
         "invented": len(invented),
+        "contradicted": len(wrong),
         "formula": (f"0.45x{voice} + 0.25x{round(10 * rate, 1)} + 0.3x{note}"
                     f" - 2x{len(hard)} - 3x{len(invented)} = {round(raw, 1)}"),
     }
@@ -87,6 +95,9 @@ def decide(
     if score >= approve_min:
         if invented:
             return Decision("review", f"Scored {score}/10 but may contain an invented detail: {invented[0]}")
+        wrong = contradicted_claims(checklist)
+        if wrong:
+            return Decision("review", f"Scored {score}/10 but sources contradict a claim: {wrong[0]['claim']}")
         if hard:
             return Decision("review", f"Scored {score}/10 but still has format issues: {', '.join(hard)}.")
         if verify and not allow_verify:

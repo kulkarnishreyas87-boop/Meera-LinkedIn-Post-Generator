@@ -90,13 +90,24 @@ def _news_block(angle: NewsAngle | None) -> str:
             "NEWS ANGLE: none. " + reason + "\n"
             "Do not reference any news item, report, survey or statistic that is not in the note or the fact sheet."
         )
+    when = f" on {angle.published}" if angle.published else ""
+    credible = f" ({angle.tier_label})" if angle.tier_label else ""
+    if angle.summary and angle.summary_verified:
+        what = f"- What it reports (verified from search results): {angle.summary}\n"
+    elif angle.summary:
+        what = f"- Summary (NOT verified - treat as uncertain): {angle.summary}\n"
+    else:
+        what = "- No verified summary: use only what the headline itself states.\n"
     return (
-        "NEWS ANGLE (verified via Google Search - use it, don't invent beyond it):\n"
-        f"- Headline: {angle.title}\n- Outlet: {angle.source}\n- URL (do not put the URL in the post): {angle.url}\n"
-        f"- What it says: {angle.summary or '(no summary)'}\n- Why it's relevant: {angle.note or ''}\n"
+        f"NEWS ANGLE (a real article found via {'Google News' if angle.via == 'google_news' else 'Google Search'} - "
+        "use it, don't invent beyond it):\n"
+        f"- Headline: {angle.title}\n- Outlet: {angle.source}{credible}, published{when or ' recently'}\n"
+        f"- URL (do not put the URL in the post): {angle.url}\n{what}"
+        f"- Why it's relevant: {angle.note or ''}\n"
         "Work it in naturally, usually in the hook or where the mechanism meets the real world, and name the "
-        "outlet in prose. Only state figures from it that appear above; if you need a figure from it that is "
-        "not above, use a [VERIFY: ...] marker. It must not take over the post - the note's insight is the spine."
+        "outlet in prose (for example 'reported by <outlet> this month'). Only state figures that appear above; "
+        "if you need anything more from the article, use a [VERIFY: ...] marker. It must not take over the post - "
+        "the note's insight is the spine."
     )
 
 

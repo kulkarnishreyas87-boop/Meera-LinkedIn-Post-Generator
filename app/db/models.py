@@ -77,6 +77,11 @@ class Draft(SQLModel, table=True):
     news_url: str | None = None
     news_summary: str | None = None
     news_note: str | None = None  # why it's relevant, or why no angle was used
+    news_published: str | None = None  # ISO date of the article
+    news_tier: str | None = None  # regulator | journal | press | trade | other
+    news_via: str | None = None  # google_news | google_search
+    # Credible, verified sources for the post (news angle + claim support), for the first comment
+    sources: list[dict[str, Any]] | None = Field(default=None, sa_column=Column(JSON))
 
     checklist: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     reviewer_notes: str | None = None  # placeholders to fill / claims to verify

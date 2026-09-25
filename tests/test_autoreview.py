@@ -172,7 +172,7 @@ def env(monkeypatch):
         monkeypatch.setattr(mod, "generate", gen)
     monkeypatch.setattr(orchestrator, "find_news_angle", lambda *a: research.NewsAngle(found=False, note="none"))
     settings = replace(orchestrator.get_settings(), gemini_api_key="k", triage_threshold=7, auto_review=True,
-                       auto_approve_min=8, auto_discard_below=7, auto_approve_with_verify=False)
+                       auto_approve_min=8, auto_discard_below=7, auto_approve_with_verify=False, source_check=False)
     monkeypatch.setattr(orchestrator, "get_settings", lambda: settings)
     state["settings"] = settings
     with db_session.session_scope() as s:

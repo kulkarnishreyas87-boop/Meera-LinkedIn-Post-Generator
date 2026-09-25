@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import { AutoReviewPanel, FillFactsPanel } from "../components/AutoReviewPanel";
 import { ChecklistPanel } from "../components/ChecklistPanel";
+import { SourcesPanel, TierBadge } from "../components/SourcesPanel";
 import { DraftingProgress } from "../components/DraftingProgress";
 import { useDraftRunner } from "../components/Layout";
 import { LinkedInPreview } from "../components/LinkedInPreview";
@@ -110,9 +111,13 @@ function NewsPanel({ draft }: { draft: Draft }) {
   return (
     <section className="card relative overflow-hidden p-5 sm:p-6">
       <div className="absolute inset-y-0 left-0 w-[3px] bg-sage" aria-hidden />
-      <div className="mb-2 flex items-center justify-between gap-2">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="label">News angle · {draft.news_source}</span>
-        <span className="font-mono text-[10px] text-sage-ink">grounded</span>
+        <span className="font-mono text-[10px] text-sage-ink">{draft.news_via === "google_news" ? "via Google News" : "via Google Search"}</span>
+      </div>
+      <div className="mb-2 flex flex-wrap items-center gap-2 font-mono text-[10.5px] text-muted">
+        <TierBadge tier={draft.news_tier} />
+        {draft.news_published && <span>published {draft.news_published}</span>}
       </div>
       <h3 className="text-[19px] leading-snug text-ink">{draft.news_title}</h3>
       {draft.news_summary && <p className="mt-2 text-[13.5px] leading-relaxed text-ink-2">{draft.news_summary}</p>}
@@ -313,6 +318,7 @@ function DraftWorkbench({ draft, note }: { draft: Draft; note: NoteDetail }) {
       )}
 
       <ChecklistPanel checklist={draft.checklist} />
+      <SourcesPanel draft={draft} />
       <p className="px-1 font-mono text-[10.5px] text-muted">note #{pad(note.id)} · draft #{pad(draft.id)} · this app never posts to LinkedIn</p>
     </div>
   );

@@ -56,7 +56,7 @@ def fake_gemini(monkeypatch):
         monkeypatch.setattr(mod, "generate", gen)
     from dataclasses import replace
 
-    settings = replace(orchestrator.get_settings(), gemini_api_key="test-key", triage_threshold=7)
+    settings = replace(orchestrator.get_settings(), gemini_api_key="test-key", triage_threshold=7, source_check=False)
     monkeypatch.setattr(orchestrator, "get_settings", lambda: settings)
     monkeypatch.setattr(orchestrator, "find_news_angle",
                         lambda *a: research.NewsAngle(found=False, note="No news angle used: test"))
@@ -99,7 +99,7 @@ def test_full_pipeline(db, fake_gemini):
 def test_research_rejects_ungrounded_source(monkeypatch):
     fake = R(json.dumps({"found": True, "title": "Made up", "publisher": "Nowhere", "url": "https://fake.example/x"}))
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: fake)
-    angle = research.find_news_angle("note", "Ingredient Deep-Dive", "x")
+    angle = research.find_news_angle_grounded("note", "Ingredient Deep-Dive", "x")
     assert angle.found is False
 
 
@@ -115,14 +115,14 @@ def _grounded(text, domains):
 def test_research_rejects_source_not_in_grounding(monkeypatch):
     claim = json.dumps({"found": True, "title": "T", "publisher": "Fake Wire", "url": "https://fakewire.example/x"})
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["economictimes.indiatimes.com"]))
-    assert research.find_news_angle("note", None, None).found is False
+    assert research.find_news_angle_grounded("note", None, None).found is False
 
 
 def test_research_accepts_grounded_source(monkeypatch):
     claim = json.dumps({"found": True, "title": "CDSCO tightens cosmetic labelling", "publisher": "The Economic Times",
                         "url": "https://economictimes.indiatimes.com/news/x", "summary": "s", "relevance": "r"})
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["economictimes.indiatimes.com"]))
-    angle = research.find_news_angle("note", None, None)
+    angle = research.find_news_angle_grounded("note", None, None)
     assert angle.found and angle.url == "https://economictimes.indiatimes.com/news/x"
 
 
@@ -131,7 +131,7 @@ def test_research_follows_doi_redirect_to_grounded_publisher(monkeypatch):
                         "url": "https://doi.org/10.3390/ph18091273", "summary": "s", "relevance": "r"})
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["mdpi.com"]))
     monkeypatch.setattr(research, "follow_url", lambda u: "https://www.mdpi.com/1424-8247/18/9/1273")
-    angle = research.find_news_angle("note", None, None)
+    angle = research.find_news_angle_grounded("note", None, None)
     assert angle.found and angle.url.startswith("https://www.mdpi.com/")
 
 
@@ -139,7 +139,7 @@ def test_research_redirect_to_ungrounded_domain_still_rejected(monkeypatch):
     claim = json.dumps({"found": True, "title": "T", "publisher": "P", "url": "https://doi.org/10.1/x"})
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: _grounded(claim, ["mdpi.com"]))
     monkeypatch.setattr(research, "follow_url", lambda u: "https://somewhere-else.example/x")
-    assert research.find_news_angle("note", None, None).found is False
+    assert research.find_news_angle_grounded("note", None, None).found is False
 
 
 def test_app_note_forbids_invented_anecdotes():
@@ -169,6 +169,6 @@ def test_research_falls_back_to_google_citation(monkeypatch):
     ]
     monkeypatch.setattr(research.gemini, "generate", lambda *a, **k: r)
     monkeypatch.setattr(research, "follow_url", lambda u: u)
-    angle = research.find_news_angle("note", None, None)
+    angle = research.find_news_angle_grounded("note", None, None)
     assert angle.found and angle.url == "https://mdpi.com/article" and angle.source == "mdpi.com"
     assert "cureus" not in angle.url and "check the headline" in angle.note

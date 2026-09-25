@@ -44,6 +44,8 @@ class Settings:
     auto_approve_min: int = 8  # draft quality score at or above this is auto-approved ("above 7")
     auto_discard_below: int = 7  # below this (after one auto-redraft) is auto-discarded
     auto_approve_with_verify: bool = False  # unfilled [VERIFY] markers block auto-approval
+    source_check: bool = True  # fact-check each draft's claims against credible sources
+    instant_draft: bool = True  # score each Telegram note on arrival and draft it if it clears the bar
 
     def require_gemini(self) -> None:
         if not self.gemini_api_key:
@@ -81,4 +83,6 @@ def get_settings() -> Settings:
         auto_approve_min=_int("AUTO_APPROVE_MIN", 8),
         auto_discard_below=_int("AUTO_DISCARD_BELOW", 7),
         auto_approve_with_verify=_bool("AUTO_APPROVE_WITH_VERIFY", False),
+        source_check=_bool("SOURCE_CHECK", True),
+        instant_draft=_bool("INSTANT_DRAFT", True),
     )

@@ -10,6 +10,7 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from app.db.models import Draft, Note
 
 TG_LIMIT = 4096
+TIER_SHORT = {"regulator": "🏛 regulator", "journal": "🔬 journal", "press": "📰 press", "trade": "🏷 trade", "other": "other"}
 VERIFY_RE = re.compile(r"\[VERIFY:[^\]]*\]", re.IGNORECASE)
 
 
@@ -123,10 +124,27 @@ def footer(draft: Draft) -> str:
     c = draft.checklist or {}
     lines = []
     if draft.news_found and draft.news_url:
-        lines.append(f'📰 Angle: <a href="{html.escape(draft.news_url, quote=True)}">{html.escape(draft.news_title or draft.news_source or "source")}</a>'
-                     + (f" ({html.escape(draft.news_source)})" if draft.news_source else ""))
+        meta = " · ".join(x for x in [draft.news_source, TIER_SHORT.get(draft.news_tier or "", ""), draft.news_published] if x)
+        via = " · via Google News" if draft.news_via == "google_news" else ""
+        lines.append(f'📰 Angle: <a href="{html.escape(draft.news_url, quote=True)}">{html.escape(draft.news_title or "source")}</a>'
+                     + (f" ({html.escape(meta)}{via})" if meta else ""))
     else:
         lines.append("📰 No news angle: " + html.escape(draft.news_note or "nothing credible found"))
+
+    cc = c.get("claim_check") or {}
+    if cc.get("claims"):
+        summary = f"{cc.get('supported', 0)} supported · {cc.get('unclear', 0)} unclear · {cc.get('contradicted', 0)} contradicted"
+        lines.append(f"🔍 Claim check: {summary}")
+        for x in cc["claims"]:
+            if x.get("verdict") == "contradicted":
+                lines.append(f"   ❌ {html.escape(x['claim'])} - <i>{html.escape(x.get('explanation') or '')}</i>")
+    srcs = draft.sources or []
+    if srcs:
+        lines.append("📚 Sources (for your first comment):")
+        for i, s in enumerate(srcs[:4], 1):
+            tier = TIER_SHORT.get(s.get("tier") or "", "")
+            lines.append(f'   {i}. <a href="{html.escape(s.get("url") or "", quote=True)}">{html.escape(s.get("publisher") or "source")}</a>'
+                         + (f" · {tier}" if tier else "") + (f" · {s['published']}" if s.get("published") else ""))
     failed = [ch["label"] for ch in c.get("checks", []) if not ch["passed"] and ch["severity"] != "info"]
     failed += [f"Self-check #{r['n']}" for r in c.get("self_check", []) if r.get("passed") is False]
     lines.append("☑️ Checklist: all passed" if not failed else "⚠️ Check: " + html.escape(", ".join(failed)))

@@ -15,9 +15,11 @@ from app.config import get_settings
 from app.db import repo
 from app.db.models import REVIEWABLE, Draft, DraftStatus, Note, NoteStatus, utcnow
 from app.db.session import session_scope
-from app.pipeline import autoreview
+from app.pipeline import autoreview, news_rss
+from app.pipeline import sources as sources_mod
 from app.pipeline.checklist import run_checklist
 from app.pipeline.draft import DraftResult, produce_draft
+from app.pipeline.duplicates import match_published
 from app.pipeline.gemini import GeminiUnavailable
 from app.pipeline.research import NewsAngle, find_news_angle
 from app.pipeline.triage import TriageResult, is_publishable, triage_text
@@ -52,6 +54,21 @@ def triage_note(note_id: int) -> Note:
         if note is None:
             raise LookupError(f"Note {note_id} not found")
         text = note.text
+    dup = match_published(text)
+    if dup is not None:  # already published - never redraft it
+        heading, overlap = dup
+        with session_scope() as s:
+            note = s.get(Note, note_id)
+            note.score, note.publishable = 0, False
+            note.reason = f"This repeats an already-published post ({heading}, {overlap:.0%} overlap), so it won't be redrafted."
+            note.triaged_at = utcnow()
+            if note.status == NoteStatus.new:
+                note.status = NoteStatus.triaged
+            s.add(note)
+            s.commit()
+            s.refresh(note)
+            log.info("Note %s matches published post %s (%.0f%%)", note_id, heading, overlap * 100)
+            return note
     result: TriageResult = triage_text(text, threshold)
     with session_scope() as s:
         note = s.get(Note, note_id)
@@ -119,6 +136,9 @@ def draft_note(note_id: int, instruction: str | None = None, reuse_angle: bool =
             angle = NewsAngle(
                 found=previous.news_found, title=previous.news_title, source=previous.news_source,
                 url=previous.news_url, summary=previous.news_summary, note=previous.news_note,
+                published=previous.news_published, tier=previous.news_tier,
+                tier_label=news_rss.TIERS.get(previous.news_tier or "", (0, None))[1], via=previous.news_via,
+                link_is_publisher=bool(previous.news_url and "news.google.com" not in previous.news_url),
             )
         else:
             angle = find_news_angle(note.text, note.category, note.core_insight)
@@ -133,6 +153,7 @@ def draft_note(note_id: int, instruction: str | None = None, reuse_angle: bool =
             previous_body=previous.body if (previous and requested_by_meera) else None,
         )
         result.checklist["note_score"] = note.score
+        _source_check(result)
         score, breakdown = autoreview.quality_score(result.checklist)
         decision = _decide(score, result.checklist, requested_by_meera)
 
@@ -145,6 +166,7 @@ def draft_note(note_id: int, instruction: str | None = None, reuse_angle: bool =
                 previous_body=result.body,
             )
             retry.checklist["note_score"] = note.score
+            _source_check(retry)
             score, breakdown = autoreview.quality_score(retry.checklist)
             retry.checklist["auto_redraft_of_score"] = first_score
             result = retry
@@ -170,6 +192,10 @@ def draft_note(note_id: int, instruction: str | None = None, reuse_angle: bool =
                 news_url=angle.url,
                 news_summary=angle.summary,
                 news_note=angle.note,
+                news_published=angle.published,
+                news_tier=angle.tier,
+                news_via=angle.via,
+                sources=sources_mod.source_list(angle, result.checklist.get("claim_check")),
                 quality_score=score,
             )
             n = s.get(Note, note_id)
@@ -182,6 +208,16 @@ def draft_note(note_id: int, instruction: str | None = None, reuse_angle: bool =
             log.info("Drafted note %s -> draft %s v%s (%s words, score %s, %s)", note_id, draft.id, draft.version,
                      result.checklist.get("word_count"), score, draft.decision or "manual review")
             return draft
+
+
+def _source_check(result: DraftResult) -> None:
+    """Fact-check the draft's claims against credible sources (stored on the checklist)."""
+    if not get_settings().source_check:
+        return
+    try:
+        result.checklist["claim_check"] = sources_mod.check_post(result.body)
+    except Exception:  # a failed check must never block drafting
+        log.exception("Source check failed")
 
 
 def _decide(score, checklist: dict, requested_by_meera: bool):
@@ -289,7 +325,7 @@ def _rescore_after_human_change(draft: Draft, note: Note) -> None:
     """
     old = draft.checklist or {}
     check = run_checklist(draft.body)
-    for key in ("self_check", "review", "revised", "auto_redraft_of_score", "note_score"):
+    for key in ("self_check", "review", "revised", "auto_redraft_of_score", "note_score", "claim_check"):
         if key in old:
             check[key] = old[key]
     check["edited"] = True
